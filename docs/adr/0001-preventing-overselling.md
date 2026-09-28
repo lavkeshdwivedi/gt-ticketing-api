@@ -18,19 +18,25 @@ BEGIN TRAN
                                            -- idempotency key fails here, before inventory.
   -- one round trip (Persistence/TicketInventory.cs):
   UPDATE Events SET LastSoldAt = @now      -- 1. still on sale? takes the event row lock,
-   WHERE Id = @eventId AND Status = 'Scheduled'  --    bumps the aggregate rowversion
+   WHERE Id = @eventId AND Status = 'Scheduled'  --    the same lock admin writes take
      AND IsDeleted = 0 AND StartsAt > @now;
   IF @@ROWCOUNT = 0 -> 409 event.not_on_sale (rolls back the order)
 
-  UPDATE PricingTiers SET Sold = Sold + @qty     -- 2. conditional increment
-   WHERE Id = @tierId AND EventId = @eventId AND Sold + @qty <= Capacity;
-  IF @@ROWCOUNT = 0 -> 409 tickets.sold_out (rolls back the order)
+  UPDATE PricingTiers SET Sold = Sold + @qty     -- 2. conditional increment, only at the
+   WHERE Id = @tierId AND EventId = @eventId     --    price the order was placed at
+     AND Sold + @qty <= Capacity
+     AND Price = @price AND Currency = @currency;
+  IF @@ROWCOUNT = 0 -> 409 tier.price_changed or tickets.sold_out (rolls back the order)
 COMMIT
 ```
 
 The first version issued these as separate EF calls, holding the event lock across four round trips. The load test showed that lock window bounds throughput on a single event, so the order insert moved ahead of the lock and the two updates became one batch. That roughly doubled hot-event throughput (see `loadtest/RESULTS.md`). This batch is the only hand-written SQL in the service, and it has its own tests for every branch.
 
-The Event row's `rowversion` is therefore a true aggregate version: every change to the aggregate, including inventory, bumps it. Admin edits, cancels and deletes use optimistic concurrency on that token, so an admin acting on a stale view gets 409 or 412 instead of racing a sale.
+Admin edits, cancels and deletes take the same event row lock (`UPDLOCK`) before loading the aggregate, inside their transaction. So a sale and an admin change never interleave: a delete cannot remove an event whose first sale is committing, and a capacity edit always checks against the current sold count. Admin writes are rare and short, so the extra lock costs nothing measurable.
+
+An earlier version relied on every sale bumping the event's `rowversion` instead, so a stale admin write failed its concurrency check. That was correct, but the rowversion was also the ETag, so during an on-sale an admin could not even fix a typo without a `412`. Taking the lock on the admin side keeps the same guarantee without the churn (ADR 0005).
+
+The price check in step 2 closes a smaller gap: the order's unit price comes from the snapshot read before the transaction. If an admin changes the price in that window, the reservation refuses with `409 tier.price_changed` rather than charging the old price.
 
 Before the transaction, the handler runs every business rule in memory against a snapshot of the aggregate (`Event.ReserveTickets`). That gives precise error messages and avoids a round trip for obviously invalid requests. The snapshot can be stale; the SQL guard is what actually enforces the invariant.
 
@@ -46,5 +52,5 @@ A `CHECK (Sold >= 0 AND Sold <= Capacity)` constraint backs this up, so even a f
 
 - Purchases for the same event serialize on one row lock for the duration of a short transaction. Purchases for different events are fully parallel. Measured on a laptop: about 158 purchases/s on one hot event versus 900+/s spread across events (`loadtest/RESULTS.md`).
 - The rule "enough seats" exists twice: in `PricingTier.Reserve` (in memory, for early and precise errors) and in the SQL guard (authoritative). Both are covered by tests.
-- The event's ETag changes after every sale, even though the event's JSON representation does not include sales counts. That is intentional: edits must be based on the current inventory.
+- Sales for an event wait while an admin change to that event commits. A rare admin change that removes an unsold tier at the moment a buyer is ordering from it can deadlock with that purchase; SQL Server picks a victim and the execution strategy retries it.
 - **At flash-sale scale** (a stadium on-sale), I would move to a reservation model: a request queue per event (Azure Service Bus sessions keyed by event id) feeding a single consumer that allocates seats, with short-lived holds that expire unless payment confirms. That trades immediate answers for smooth throughput and fairness.

@@ -9,12 +9,17 @@ public sealed class CancelEventCommandHandler(IEventRepository events, IUnitOfWo
 {
     public async Task<EventDto> HandleAsync(CancelEventCommand command, CancellationToken cancellationToken)
     {
-        var @event = await events.GetForUpdateAsync(command.Id, cancellationToken)
-            ?? throw new NotFoundException("Event", command.Id);
+        return await unitOfWork.ExecuteInTransactionAsync(
+            async ct =>
+            {
+                var @event = await events.GetForUpdateAsync(command.Id, ct)
+                    ?? throw new NotFoundException("Event", command.Id);
 
-        @event.Cancel(clock.GetUtcNow());
-        await unitOfWork.SaveChangesAsync(cancellationToken);
+                @event.Cancel(clock.GetUtcNow());
+                await unitOfWork.SaveChangesAsync(ct);
 
-        return @event.ToDto(events.GetVersion(@event));
+                return @event.ToDto(events.GetVersion(@event));
+            },
+            cancellationToken);
     }
 }

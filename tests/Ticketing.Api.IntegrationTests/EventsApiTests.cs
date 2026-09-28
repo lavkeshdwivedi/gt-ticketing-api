@@ -121,16 +121,80 @@ public sealed class EventsApiTests(ApiFactory factory)
     }
 
     [Fact]
-    public async Task A_purchase_changes_the_event_version_so_admin_edits_based_on_stale_inventory_are_rejected()
+    public async Task A_purchase_does_not_change_the_etag_so_an_admin_edit_during_an_on_sale_succeeds()
     {
         var admin = await factory.Admin();
         var created = await admin.CreateEventAsync(TestApi.NewEvent());
         var purchase = await (await factory.Buyer()).PurchaseAsync(created.Id, created.Tiers[0].Id, 2);
         await purchase.ShouldHaveStatus(HttpStatusCode.Created);
 
-        var response = await admin.SendAsync(Put(created, name: "Edited from stale view", ifMatch: created.Version));
+        var fetched = await factory.Anonymous().GetAsync($"/api/v1/events/{created.Id}");
+        fetched.Headers.ETag!.Tag.ShouldBe($"\"{created.Version}\"");
 
-        await response.ShouldBeProblem(HttpStatusCode.PreconditionFailed, "precondition_failed");
+        var response = await admin.SendAsync(Put(created, name: "Typo fixed mid on-sale", ifMatch: created.Version));
+
+        await response.ShouldHaveStatus(HttpStatusCode.OK);
+        (await response.ReadAsync<EventDto>()).Name.ShouldBe("Typo fixed mid on-sale");
+    }
+
+    [Fact]
+    public async Task An_admin_edit_racing_a_burst_of_purchases_is_never_rejected_by_the_sales()
+    {
+        var admin = await factory.Admin();
+        var created = await admin.CreateEventAsync(TestApi.SingleTierEvent(capacity: 100, price: 20m));
+        var buyers = await Task.WhenAll(Enumerable.Range(0, 40).Select(_ => factory.Buyer()));
+
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var purchases = buyers.Select(async buyer =>
+        {
+            await gate.Task;
+            return await buyer.PurchaseAsync(created.Id, created.Tiers[0].Id, 1);
+        }).ToList();
+        var edit = Task.Run(async () =>
+        {
+            await gate.Task;
+            return await admin.SendAsync(Put(created, name: "Renamed during the rush", ifMatch: created.Version));
+        });
+        gate.SetResult();
+
+        await (await edit).ShouldHaveStatus(HttpStatusCode.OK);
+        (await Task.WhenAll(purchases)).ShouldAllBe(r => r.StatusCode == HttpStatusCode.Created);
+    }
+
+    [Fact]
+    public async Task Delete_racing_a_purchase_never_deletes_an_event_with_a_sale()
+    {
+        var admin = await factory.Admin();
+        var buyer = await factory.Buyer();
+
+        for (var i = 0; i < 20; i++)
+        {
+            var created = await admin.CreateEventAsync(TestApi.SingleTierEvent(capacity: 10));
+            var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var purchase = Task.Run(async () =>
+            {
+                await gate.Task;
+                return await buyer.PurchaseAsync(created.Id, created.Tiers[0].Id, 1);
+            });
+            var delete = Task.Run(async () =>
+            {
+                await gate.Task;
+                return await admin.DeleteAsync($"/api/v1/events/{created.Id}");
+            });
+            gate.SetResult();
+            var (bought, deleted) = (await purchase, await delete);
+
+            // Exactly one side wins: a sale blocks the delete, or the delete takes the event off sale.
+            if (bought.StatusCode == HttpStatusCode.Created)
+            {
+                deleted.StatusCode.ShouldBe(HttpStatusCode.Conflict);
+            }
+            else
+            {
+                deleted.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+                bought.StatusCode.ShouldBeOneOf(HttpStatusCode.NotFound, HttpStatusCode.Conflict);
+            }
+        }
     }
 
     [Fact]

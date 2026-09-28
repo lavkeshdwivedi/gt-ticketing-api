@@ -28,7 +28,7 @@ I built this with Claude Code (Anthropic's coding agent) working in my terminal.
 ## Where it accelerated me
 
 - Scaffolding the solution, central package management, analyzers and warnings-as-errors in minutes.
-- Writing the bulk of the tests. 117 tests (domain, handlers, architecture rules, and Testcontainers integration tests including a 200-buyer race) is not something I would have had time to write by hand in a few hours.
+- Writing the bulk of the tests. 122 tests (domain, handlers, architecture rules, and Testcontainers integration tests including a 200-buyer race) is not something I would have had time to write by hand in a few hours.
 - Keeping docs honest: ADRs were written alongside the code, and updated when the code changed (ADR 0001 was revised after the load test).
 - Checking current facts instead of guessing: current .NET support dates, current package versions, which libraries changed licence.
 
@@ -44,11 +44,11 @@ I think this is the most important part. AI output is a draft until something in
 6. **Three more from a deliberate review pass.** After everything was green I had the agent re-read the purchase path and error handling looking for failure modes. It found: an admin removing an unsold tier while a buyer purchases from it surfaced as a 500 (foreign key violation), now a 409 retry; malformed JSON returned a 400 without the stable `code` every other error has; and the controllers' `[Produces]` attributes were silently turning error bodies into `application/json`. That last one was caught only because the new test asserted the content type. Each fix came with a test.
 7. **A race found during design, not by a test.** Delete versus purchase could delete an event with a sale on it. The agent flagged it while implementing the delete path and laid out three ways to close it; I chose the fix.
 
-8. **Two gaps I found reviewing the finished code myself.** Neither is covered by a test yet, and I would fix both before production:
-   - Because every sale bumps the event's rowversion, and that rowversion is also the ETag, an admin editing a popular event during an on-sale will keep getting `412` even for a description typo. The fix is to version the editable details separately from inventory.
-   - The order's unit price comes from the event read before the purchase transaction. If an admin changes a tier's price in that small window, the buyer pays the old price. The fix is to include the expected price in the guarded tier `UPDATE`.
+8. **Two gaps I found reviewing the finished code myself, after the first push.** Both are now fixed, each with tests:
+   - Every sale bumped the event's rowversion, and that rowversion was also the ETag, so an admin editing a popular event during an on-sale kept getting `412` even for a description typo. The ETag now comes from a revision counter that only admin changes bump, and admin writes take the same event row lock as purchases, so the original race protection holds (ADR 0001, 0005). One test fires 40 purchases and an admin edit together; another races delete against purchase 20 times.
+   - The order's unit price came from the event read before the purchase transaction. If an admin changed a tier's price in that small window, the buyer paid the old price. The guarded tier `UPDATE` now also requires the price the order was placed at, and returns `409 tier.price_changed` otherwise.
 
-   The in-memory rate limiter is also per instance. Behind several instances, the effective limit multiplies, so in production it belongs at the gateway (Front Door or APIM) or in a shared store.
+   Still open: the in-memory rate limiter is per instance. Behind several instances, the effective limit multiplies, so in production it belongs at the gateway (Front Door or APIM) or in a shared store.
 
 ## How I verified
 

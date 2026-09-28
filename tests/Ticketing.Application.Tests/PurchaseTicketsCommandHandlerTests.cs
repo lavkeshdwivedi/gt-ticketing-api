@@ -22,7 +22,7 @@ public sealed class PurchaseTicketsCommandHandlerTests
     public PurchaseTicketsCommandHandlerTests()
     {
         _events.GetReadOnlyAsync(_concert.Id, Arg.Any<CancellationToken>()).Returns(_concert);
-        _inventory.TryReserveAsync(default, default, default, default, default)
+        _inventory.TryReserveAsync(default, default, default, default!, default, default)
             .ReturnsForAnyArgs(ReservationOutcome.Reserved);
     }
 
@@ -42,15 +42,28 @@ public sealed class PurchaseTicketsCommandHandlerTests
         result.Order.Total.ShouldBe(300m);
         result.Order.Currency.ShouldBe("USD");
         result.Order.Tickets.Count.ShouldBe(2);
-        await _inventory.Received(1).TryReserveAsync(_concert.Id, _concert.Tiers[0].Id, 2, Clock.Now, Arg.Any<CancellationToken>());
+        await _inventory.Received(1).TryReserveAsync(
+            _concert.Id, _concert.Tiers[0].Id, 2, _concert.Tiers[0].Price, Clock.Now, Arg.Any<CancellationToken>());
         _orders.Received(1).Add(Arg.Is<TicketOrder>(o => o.PurchasedBy == "user-1"));
         _unitOfWork.CommittedSaves.ShouldBe(1);
     }
 
     [Fact]
+    public async Task Price_changed_at_write_time_returns_conflict_and_rolls_back_the_order()
+    {
+        _inventory.TryReserveAsync(default, default, default, default!, default, default)
+            .ReturnsForAnyArgs(ReservationOutcome.PriceChanged);
+
+        var ex = await Should.ThrowAsync<DomainConflictException>(() => Handler().HandleAsync(Command(), CancellationToken.None));
+
+        ex.Code.ShouldBe("tier.price_changed");
+        _unitOfWork.CommittedSaves.ShouldBe(0);
+    }
+
+    [Fact]
     public async Task Sold_out_at_write_time_returns_conflict_and_rolls_back_the_order()
     {
-        _inventory.TryReserveAsync(default, default, default, default, default)
+        _inventory.TryReserveAsync(default, default, default, default!, default, default)
             .ReturnsForAnyArgs(ReservationOutcome.InsufficientInventory);
 
         var ex = await Should.ThrowAsync<DomainConflictException>(() => Handler().HandleAsync(Command(), CancellationToken.None));
@@ -69,13 +82,13 @@ public sealed class PurchaseTicketsCommandHandlerTests
 
         await Handler().HandleAsync(Command(key: "abc-123"), CancellationToken.None);
 
-        await _inventory.DidNotReceiveWithAnyArgs().TryReserveAsync(default, default, default, default, default);
+        await _inventory.DidNotReceiveWithAnyArgs().TryReserveAsync(default, default, default, default!, default, default);
     }
 
     [Fact]
     public async Task Event_cancelled_between_read_and_write_returns_conflict()
     {
-        _inventory.TryReserveAsync(default, default, default, default, default)
+        _inventory.TryReserveAsync(default, default, default, default!, default, default)
             .ReturnsForAnyArgs(ReservationOutcome.EventNotOnSale);
 
         var ex = await Should.ThrowAsync<DomainConflictException>(() => Handler().HandleAsync(Command(), CancellationToken.None));
@@ -91,7 +104,7 @@ public sealed class PurchaseTicketsCommandHandlerTests
         var ex = await Should.ThrowAsync<DomainConflictException>(() => Handler().HandleAsync(Command(), CancellationToken.None));
 
         ex.Code.ShouldBe("event.cancelled");
-        await _inventory.DidNotReceiveWithAnyArgs().TryReserveAsync(default, default, default, default, default);
+        await _inventory.DidNotReceiveWithAnyArgs().TryReserveAsync(default, default, default, default!, default, default);
     }
 
     [Fact]
@@ -114,7 +127,7 @@ public sealed class PurchaseTicketsCommandHandlerTests
 
         replay.Replayed.ShouldBeTrue();
         replay.Order.Id.ShouldBe(original.Order.Id);
-        await _inventory.DidNotReceiveWithAnyArgs().TryReserveAsync(default, default, default, default, default);
+        await _inventory.DidNotReceiveWithAnyArgs().TryReserveAsync(default, default, default, default!, default, default);
     }
 
     [Fact]

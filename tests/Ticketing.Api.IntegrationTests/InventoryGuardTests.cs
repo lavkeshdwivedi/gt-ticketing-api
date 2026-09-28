@@ -1,9 +1,11 @@
 using System.Net;
+using System.Net.Http.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Ticketing.Api.IntegrationTests.Infrastructure;
 using Ticketing.Application.Abstractions;
 using Ticketing.Application.Common;
 using Ticketing.Application.Events;
+using Ticketing.Domain.Common;
 using Ticketing.Domain.Events;
 using Ticketing.Domain.Orders;
 
@@ -16,13 +18,15 @@ namespace Ticketing.Api.IntegrationTests;
 [Collection(SharedApi.Name)]
 public sealed class InventoryGuardTests(ApiFactory factory)
 {
-    private async Task<ReservationOutcome> Reserve(EventDto @event, int quantity, DateTimeOffset? now = null)
+    private async Task<ReservationOutcome> Reserve(
+        EventDto @event, int quantity, DateTimeOffset? now = null, decimal? price = null, string? currency = null)
     {
         await using var scope = factory.Services.CreateAsyncScope();
         var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
         var inventory = scope.ServiceProvider.GetRequiredService<ITicketInventory>();
+        var expected = Money.Of(price ?? @event.Tiers[0].Price, currency ?? @event.Currency);
         return await unitOfWork.ExecuteInTransactionAsync(
-            ct => inventory.TryReserveAsync(@event.Id, @event.Tiers[0].Id, quantity, now ?? DateTimeOffset.UtcNow, ct),
+            ct => inventory.TryReserveAsync(@event.Id, @event.Tiers[0].Id, quantity, expected, now ?? DateTimeOffset.UtcNow, ct),
             CancellationToken.None);
     }
 
@@ -34,6 +38,30 @@ public sealed class InventoryGuardTests(ApiFactory factory)
         (await Reserve(created, 2)).ShouldBe(ReservationOutcome.Reserved);
         (await Reserve(created, 2)).ShouldBe(ReservationOutcome.InsufficientInventory);
         (await Reserve(created, 1)).ShouldBe(ReservationOutcome.Reserved);
+        (await Reserve(created, 1)).ShouldBe(ReservationOutcome.InsufficientInventory);
+    }
+
+    [Fact]
+    public async Task A_price_changed_since_the_buyers_snapshot_is_refused_and_no_seat_is_taken()
+    {
+        var created = await (await factory.Admin()).CreateEventAsync(TestApi.SingleTierEvent(capacity: 3, price: 40m));
+
+        (await Reserve(created, 1, price: 35m)).ShouldBe(ReservationOutcome.PriceChanged);
+        (await Reserve(created, 1, currency: "EUR")).ShouldBe(ReservationOutcome.PriceChanged);
+
+        var availability = await factory.Anonymous().GetFromJsonAsync<AvailabilityDto>(
+            $"/api/v1/events/{created.Id}/availability", TestApi.Json);
+        availability!.Available.ShouldBe(3);
+        (await Reserve(created, 1)).ShouldBe(ReservationOutcome.Reserved);
+    }
+
+    [Fact]
+    public async Task A_changed_price_is_reported_even_when_the_tier_is_also_sold_out()
+    {
+        var created = await (await factory.Admin()).CreateEventAsync(TestApi.SingleTierEvent(capacity: 1, price: 40m));
+        (await Reserve(created, 1)).ShouldBe(ReservationOutcome.Reserved);
+
+        (await Reserve(created, 1, price: 35m)).ShouldBe(ReservationOutcome.PriceChanged);
         (await Reserve(created, 1)).ShouldBe(ReservationOutcome.InsufficientInventory);
     }
 
@@ -89,6 +117,7 @@ public sealed class InventoryGuardTests(ApiFactory factory)
         var inventory = scope.ServiceProvider.GetRequiredService<ITicketInventory>();
 
         await Should.ThrowAsync<InvalidOperationException>(
-            () => inventory.TryReserveAsync(created.Id, created.Tiers[0].Id, 1, DateTimeOffset.UtcNow, CancellationToken.None));
+            () => inventory.TryReserveAsync(
+                created.Id, created.Tiers[0].Id, 1, Money.Of(created.Tiers[0].Price, created.Currency), DateTimeOffset.UtcNow, CancellationToken.None));
     }
 }

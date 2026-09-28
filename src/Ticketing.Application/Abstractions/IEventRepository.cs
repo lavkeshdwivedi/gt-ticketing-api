@@ -4,7 +4,11 @@ namespace Ticketing.Application.Abstractions;
 
 public interface IEventRepository
 {
-    /// <summary>Loads the full aggregate (with tiers) with change tracking, ready to be modified and saved.</summary>
+    /// <summary>
+    /// Loads the full aggregate (with tiers) with change tracking, ready to be modified and saved.
+    /// Must run inside <see cref="IUnitOfWork.ExecuteInTransactionAsync{T}"/>: it locks the event
+    /// against concurrent sales until the transaction ends.
+    /// </summary>
     Task<Event?> GetForUpdateAsync(Guid id, CancellationToken cancellationToken);
 
     /// <summary>Loads the full aggregate without change tracking. In-memory changes are never persisted.</summary>
@@ -12,6 +16,6 @@ public interface IEventRepository
 
     void Add(Event @event);
 
-    /// <summary>Opaque concurrency token of a loaded aggregate, used as the HTTP ETag.</summary>
+    /// <summary>Opaque version of the event's editable state, used as the HTTP ETag. Sales do not change it.</summary>
     string GetVersion(Event @event);
 }

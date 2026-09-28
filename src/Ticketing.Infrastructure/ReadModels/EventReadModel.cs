@@ -30,7 +30,7 @@ internal sealed class EventReadModel(TicketingDbContext db) : IEventReadModel
                     .ToList(),
                 e.CreatedAt,
                 e.UpdatedAt,
-                Version = EF.Property<byte[]>(e, EventConfiguration.Version),
+                Revision = EF.Property<int>(e, EventConfiguration.Revision),
             })
             .SingleOrDefaultAsync(cancellationToken);
 
@@ -48,7 +48,7 @@ internal sealed class EventReadModel(TicketingDbContext db) : IEventReadModel
                 row.Tiers,
                 row.CreatedAt,
                 row.UpdatedAt,
-                RowVersion.Encode(row.Version));
+                EventRevision.Encode(row.Revision));
     }
 
     public async Task<PagedResult<EventSummaryDto>> ListAsync(ListEventsQuery query, CancellationToken cancellationToken)

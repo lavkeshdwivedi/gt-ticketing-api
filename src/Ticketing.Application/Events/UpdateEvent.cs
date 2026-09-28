@@ -33,34 +33,39 @@ public sealed class UpdateEventCommandHandler(
     {
         await validator.ValidateAndThrowAsync(command, cancellationToken);
 
-        var @event = await events.GetForUpdateAsync(command.Id, cancellationToken)
-            ?? throw new NotFoundException("Event", command.Id);
-
-        // Fail fast on a stale If-Match. The rowversion check at save time closes the remaining race.
-        if (command.ExpectedVersion is not null && command.ExpectedVersion != events.GetVersion(@event))
-        {
-            throw new PreconditionFailedException();
-        }
-
-        @event.Update(
-            command.Name,
-            command.Description,
-            command.Venue,
-            command.StartsAt,
-            command.Currency,
-            command.TotalCapacity,
-            command.Tiers.Select(t => t.ToDefinition()).ToList(),
-            clock.GetUtcNow());
-
         try
         {
-            await unitOfWork.SaveChangesAsync(cancellationToken);
+            return await unitOfWork.ExecuteInTransactionAsync(
+                async ct =>
+                {
+                    var @event = await events.GetForUpdateAsync(command.Id, ct)
+                        ?? throw new NotFoundException("Event", command.Id);
+
+                    // Checked under the event lock, so no other admin change can slip in before the save.
+                    // Sales do not change the version, so a busy on-sale does not cause spurious 412s.
+                    if (command.ExpectedVersion is not null && command.ExpectedVersion != events.GetVersion(@event))
+                    {
+                        throw new PreconditionFailedException();
+                    }
+
+                    @event.Update(
+                        command.Name,
+                        command.Description,
+                        command.Venue,
+                        command.StartsAt,
+                        command.Currency,
+                        command.TotalCapacity,
+                        command.Tiers.Select(t => t.ToDefinition()).ToList(),
+                        clock.GetUtcNow());
+
+                    await unitOfWork.SaveChangesAsync(ct);
+                    return @event.ToDto(events.GetVersion(@event));
+                },
+                cancellationToken);
         }
         catch (ConcurrencyConflictException) when (command.ExpectedVersion is not null)
         {
             throw new PreconditionFailedException();
         }
-
-        return @event.ToDto(events.GetVersion(@event));
     }
 }

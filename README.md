@@ -6,8 +6,8 @@ A REST API for a simplified event ticketing system: manage events with pricing t
 
 - **No overselling under contention.** 200 concurrent buyers racing for 50 seats sell exactly 50, and inventory counters, order rows, issued tickets and the sales report all reconcile. Tested against a real SQL Server and repeated to rule out flakiness; a k6 run of 2,000 attempts for 1,000 seats sells exactly 1,000.
 - **Safe retries.** Purchases honour `Idempotency-Key`; 20 concurrent retries with the same key produce exactly one order.
-- **No lost updates.** Admin edits use ETags; an edit based on a stale view (including stale inventory) gets `412`.
-- **117 tests** across domain, application, architecture rules and full-stack integration; **97% line coverage** of hand-written code.
+- **No lost updates.** Admin edits use ETags; an edit based on a stale view gets `412`. Sales do not change the ETag, so admins can still edit during an on-sale.
+- **122 tests** across domain, application, architecture rules and full-stack integration; **97% line coverage** of hand-written code.
 - **Measured performance.** A load test found the bottleneck the design predicted, and a targeted fix doubled hot-event throughput (`loadtest/RESULTS.md`).
 
 ---
@@ -94,9 +94,9 @@ dotnet test --settings coverage.runsettings --collect:"XPlat Code Coverage"
 | Project | Tests | What it covers |
 |---|---|---|
 | `Ticketing.Domain.Tests` | 43 | Every invariant and its boundary: exact sell-out, shrink to exactly sold, per-order limits, currency lock, soft delete vs sales, money arithmetic |
-| `Ticketing.Application.Tests` | 23 | Handlers with substitutes: write-time sell-out rolls back, idempotent replay, key reuse with a different body, losing a same-key race, If-Match handling |
+| `Ticketing.Application.Tests` | 24 | Handlers with substitutes: write-time sell-out and price change roll back, idempotent replay, key reuse with a different body, losing a same-key race, If-Match handling |
 | `Ticketing.ArchitectureTests` | 7 | Dependencies point inwards; controllers never touch persistence; the API never references EF Core; infrastructure types stay internal |
-| `Ticketing.Api.IntegrationTests` | 44 | The real app over HTTP against SQL Server in a container: CRUD, auth, every problem code, ETags, idempotency, rate limiting, reports, the overselling race, the raw SQL guard's every branch, Production hardening |
+| `Ticketing.Api.IntegrationTests` | 48 | The real app over HTTP against SQL Server in a container: CRUD, auth, every problem code, ETags, idempotency, rate limiting, reports, the overselling race, admin edits and deletes racing sales, the raw SQL guard's every branch, Production hardening |
 
 Coverage of hand-written code (generated code and migrations excluded): Application 100%, Infrastructure 96%, Domain 94%, API 100% (top-level `Program.cs` statements are compiler-generated and therefore excluded; they are exercised by every integration test). Overall 97%.
 
@@ -164,7 +164,7 @@ Dependencies point inwards (`Api -> Infrastructure -> Application -> Domain`), e
 | Topic | Decision | ADR |
 |---|---|---|
 | **Overselling** | Inside one transaction: insert the order, then one SQL batch with two guarded `UPDATE`s (event still on sale, then `Sold + qty <= Capacity`). No read-modify-write window. A `CHECK` constraint backs it up. | [0001](docs/adr/0001-preventing-overselling.md) |
-| **Admin edits racing sales** | Every purchase bumps the event's `rowversion`, so it is a true aggregate version: a delete, cancel or capacity change based on a stale view fails instead of racing a sale | [0001](docs/adr/0001-preventing-overselling.md), [0005](docs/adr/0005-concurrency-control-and-etags.md) |
+| **Admin edits racing sales** | Admin writes take the same event row lock as purchases, so a delete, cancel or capacity change always sees the current sold count, and sales never invalidate an admin's ETag. The purchase also re-checks the tier price, so a buyer is never charged a price changed mid-purchase | [0001](docs/adr/0001-preventing-overselling.md), [0005](docs/adr/0005-concurrency-control-and-etags.md) |
 | **Capacity model** | Tiers partition capacity; allocations must sum to `totalCapacity` | [0002](docs/adr/0002-tier-capacity-model.md) |
 | **CQRS** | Commands go through the domain; queries project straight to DTOs. Handlers are called directly, no mediator | [0003](docs/adr/0003-cqrs-without-a-mediator.md) |
 | **Retries** | `Idempotency-Key`, scoped per user, request fingerprinted; concurrent duplicates resolved by a unique index | [0004](docs/adr/0004-idempotent-purchases.md) |
@@ -178,7 +178,7 @@ Dependencies point inwards (`Api -> Infrastructure -> Application -> Domain`), e
 
 ```
 Events        Id, Name, Description, Venue, StartsAt (datetimeoffset), Currency, TotalCapacity,
-              Status, CreatedAt, UpdatedAt, IsDeleted, DeletedAt, LastSoldAt, Version (rowversion)
+              Status, CreatedAt, UpdatedAt, IsDeleted, DeletedAt, LastSoldAt, Revision (ETag), Version (rowversion)
 PricingTiers  Id, EventId -> Events, Name, Price, Currency, Capacity, Sold
               CHECK (Sold >= 0 AND Sold <= Capacity)
 TicketOrders  Id, EventId, PricingTierId (both ON DELETE RESTRICT), TierName, Quantity, UnitPrice,

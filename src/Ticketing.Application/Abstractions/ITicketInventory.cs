@@ -1,3 +1,5 @@
+using Ticketing.Domain.Common;
+
 namespace Ticketing.Application.Abstractions;
 
 public enum ReservationOutcome
@@ -9,6 +11,9 @@ public enum ReservationOutcome
 
     /// <summary>The tier no longer has enough seats.</summary>
     InsufficientInventory,
+
+    /// <summary>The tier's price changed since the buyer's snapshot was read.</summary>
+    PriceChanged,
 }
 
 /// <summary>
@@ -17,6 +22,10 @@ public enum ReservationOutcome
 /// </summary>
 public interface ITicketInventory
 {
+    /// <param name="expectedUnitPrice">
+    /// The price the order was placed at. The reservation only succeeds if the tier still has this
+    /// price, so a buyer is never charged a price that an admin changed mid-purchase.
+    /// </param>
     Task<ReservationOutcome> TryReserveAsync(
-        Guid eventId, Guid tierId, int quantity, DateTimeOffset now, CancellationToken cancellationToken);
+        Guid eventId, Guid tierId, int quantity, Money expectedUnitPrice, DateTimeOffset now, CancellationToken cancellationToken);
 }

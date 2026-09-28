@@ -11,7 +11,7 @@ Every error is `application/problem+json` produced in one place (`GlobalExceptio
 | 400 | The request is malformed or fails field validation | `validation_failed` (with per-field `errors`) |
 | 401 / 403 | Not signed in / not allowed | |
 | 404 | Not found, or not yours to see | `event.not_found`, `order.not_found` |
-| 409 | Valid request that conflicts with current state | `tickets.sold_out`, `event.cancelled`, `event.has_sales`, `concurrency_conflict` |
+| 409 | Valid request that conflicts with current state | `tickets.sold_out`, `tier.price_changed`, `event.cancelled`, `event.has_sales`, `concurrency_conflict` |
 | 412 | Stale `If-Match` | `precondition_failed` |
 | 422 | Well formed, but breaks a business rule | `event.capacity_mismatch`, `tier.unknown`, `idempotency_key_reused` |
 | 429 | Per-user purchase rate limit | `rate_limited` (with `Retry-After`) |

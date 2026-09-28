@@ -40,7 +40,8 @@ public sealed class PurchaseTicketsCommandValidator : AbstractValidator<Purchase
 /// 1. Replay the existing order if this caller already used the idempotency key.
 /// 2. Run every business rule in memory against a snapshot of the event (fast, precise errors).
 /// 3. In one transaction, insert the order, then atomically reserve the seats in the database.
-///    Step 3 is the real guard against overselling; the snapshot in step 2 can be stale.
+///    Step 3 is the real guard against overselling; the snapshot in step 2 can be stale, so the
+///    reservation also re-checks that the tier still has the price the order was placed at.
 /// </summary>
 public sealed class PurchaseTicketsCommandHandler(
     IValidator<PurchaseTicketsCommand> validator,
@@ -92,12 +93,15 @@ public sealed class PurchaseTicketsCommandHandler(
                     await unitOfWork.SaveChangesAsync(ct);
 
                     // Then the short, contended step. Any failure rolls back the order insert too.
-                    var outcome = await inventory.TryReserveAsync(@event.Id, tier.Id, command.Quantity, now, ct);
+                    var outcome = await inventory.TryReserveAsync(@event.Id, tier.Id, command.Quantity, order.UnitPrice, now, ct);
                     return outcome switch
                     {
                         ReservationOutcome.Reserved => order.Id,
                         ReservationOutcome.EventNotOnSale => throw new DomainConflictException(
                             "event.not_on_sale", "The event is no longer on sale (cancelled, removed or started)."),
+                        ReservationOutcome.PriceChanged => throw new DomainConflictException(
+                            "tier.price_changed",
+                            $"The price of tier '{tier.Name}' changed while this purchase was in progress. Review the new price and try again."),
                         _ => throw PricingTier.Errors.InsufficientInventory(tier.Name),
                     };
                 },
