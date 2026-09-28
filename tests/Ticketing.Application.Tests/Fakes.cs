@@ -4,10 +4,16 @@ using Ticketing.Domain.Events;
 
 namespace Ticketing.Application.Tests;
 
-/// <summary>Runs the transactional delegate inline and lets a test inject a failure at save time.</summary>
+/// <summary>
+/// Runs the transactional delegate inline and models commit/rollback: saves made inside a
+/// transaction only count as committed if the whole delegate completes.
+/// </summary>
 internal sealed class FakeUnitOfWork : IUnitOfWork
 {
-    public int SaveCount { get; private set; }
+    private int _pendingSaves;
+    private bool _inTransaction;
+
+    public int CommittedSaves { get; private set; }
 
     public Exception? ThrowOnSave { get; set; }
 
@@ -18,12 +24,34 @@ internal sealed class FakeUnitOfWork : IUnitOfWork
             throw ThrowOnSave;
         }
 
-        SaveCount++;
+        if (_inTransaction)
+        {
+            _pendingSaves++;
+        }
+        else
+        {
+            CommittedSaves++;
+        }
+
         return Task.CompletedTask;
     }
 
-    public Task<T> ExecuteInTransactionAsync<T>(Func<CancellationToken, Task<T>> operation, CancellationToken cancellationToken) =>
-        operation(cancellationToken);
+    public async Task<T> ExecuteInTransactionAsync<T>(Func<CancellationToken, Task<T>> operation, CancellationToken cancellationToken)
+    {
+        _inTransaction = true;
+        _pendingSaves = 0;
+        try
+        {
+            var result = await operation(cancellationToken);
+            CommittedSaves += _pendingSaves;
+            return result;
+        }
+        finally
+        {
+            _inTransaction = false;
+            _pendingSaves = 0;
+        }
+    }
 }
 
 internal static class Clock

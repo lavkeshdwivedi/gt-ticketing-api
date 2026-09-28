@@ -44,11 +44,11 @@ public sealed class PurchaseTicketsCommandHandlerTests
         result.Order.Tickets.Count.ShouldBe(2);
         await _inventory.Received(1).TryReserveAsync(_concert.Id, _concert.Tiers[0].Id, 2, Clock.Now, Arg.Any<CancellationToken>());
         _orders.Received(1).Add(Arg.Is<TicketOrder>(o => o.PurchasedBy == "user-1"));
-        _unitOfWork.SaveCount.ShouldBe(1);
+        _unitOfWork.CommittedSaves.ShouldBe(1);
     }
 
     [Fact]
-    public async Task Sold_out_at_write_time_returns_conflict_and_does_not_persist()
+    public async Task Sold_out_at_write_time_returns_conflict_and_rolls_back_the_order()
     {
         _inventory.TryReserveAsync(default, default, default, default, default)
             .ReturnsForAnyArgs(ReservationOutcome.InsufficientInventory);
@@ -56,8 +56,20 @@ public sealed class PurchaseTicketsCommandHandlerTests
         var ex = await Should.ThrowAsync<DomainConflictException>(() => Handler().HandleAsync(Command(), CancellationToken.None));
 
         ex.Code.ShouldBe("tickets.sold_out");
-        _orders.DidNotReceiveWithAnyArgs().Add(default!);
-        _unitOfWork.SaveCount.ShouldBe(0);
+        _unitOfWork.CommittedSaves.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Duplicate_key_collision_is_detected_before_touching_inventory()
+    {
+        _orders.FindByIdempotencyKeyAsync("user-1", "abc-123", Arg.Any<CancellationToken>())
+            .Returns(null, TicketOrder.Place(_concert, _concert.Tiers[0], 2, "Ada Lovelace", "ada@example.com", "user-1", "abc-123",
+                PurchaseTicketsCommandHandler.Fingerprint(Command(key: "abc-123")), Clock.Now));
+        _unitOfWork.ThrowOnSave = new DuplicateIdempotencyKeyException();
+
+        await Handler().HandleAsync(Command(key: "abc-123"), CancellationToken.None);
+
+        await _inventory.DidNotReceiveWithAnyArgs().TryReserveAsync(default, default, default, default, default);
     }
 
     [Fact]

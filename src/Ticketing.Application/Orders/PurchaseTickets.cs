@@ -39,7 +39,7 @@ public sealed class PurchaseTicketsCommandValidator : AbstractValidator<Purchase
 /// Purchase flow:
 /// 1. Replay the existing order if this caller already used the idempotency key.
 /// 2. Run every business rule in memory against a snapshot of the event (fast, precise errors).
-/// 3. In one transaction, atomically reserve the seats in the database and insert the order.
+/// 3. In one transaction, insert the order, then atomically reserve the seats in the database.
 ///    Step 3 is the real guard against overselling; the snapshot in step 2 can be stale.
 /// </summary>
 public sealed class PurchaseTicketsCommandHandler(
@@ -86,19 +86,20 @@ public sealed class PurchaseTicketsCommandHandler(
             await unitOfWork.ExecuteInTransactionAsync(
                 async ct =>
                 {
-                    var outcome = await inventory.TryReserveAsync(@event.Id, tier.Id, command.Quantity, now, ct);
-                    switch (outcome)
-                    {
-                        case ReservationOutcome.EventNotOnSale:
-                            throw new DomainConflictException(
-                                "event.not_on_sale", "The event is no longer on sale (cancelled, removed or started).");
-                        case ReservationOutcome.InsufficientInventory:
-                            throw PricingTier.Errors.InsufficientInventory(tier.Name);
-                    }
-
+                    // Insert first, while holding no contended lock. A duplicate idempotency key fails
+                    // here, before any inventory is touched.
                     orders.Add(order);
                     await unitOfWork.SaveChangesAsync(ct);
-                    return order.Id;
+
+                    // Then the short, contended step. Any failure rolls back the order insert too.
+                    var outcome = await inventory.TryReserveAsync(@event.Id, tier.Id, command.Quantity, now, ct);
+                    return outcome switch
+                    {
+                        ReservationOutcome.Reserved => order.Id,
+                        ReservationOutcome.EventNotOnSale => throw new DomainConflictException(
+                            "event.not_on_sale", "The event is no longer on sale (cancelled, removed or started)."),
+                        _ => throw PricingTier.Errors.InsufficientInventory(tier.Name),
+                    };
                 },
                 cancellationToken);
         }

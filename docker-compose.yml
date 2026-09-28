@@ -23,5 +23,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__Ticketing: "Server=sql,1433;Database=Ticketing;User Id=sa;Password=Local_Dev_Only_P@ssw0rd;TrustServerCertificate=true;Encrypt=true"
+      # The load test turns this off so it measures the database path, not the per-user throttle.
+      RateLimiting__Purchases__Enabled: "${PURCHASE_RATE_LIMIT_ENABLED:-true}"
     ports:
       - "8080:8080"

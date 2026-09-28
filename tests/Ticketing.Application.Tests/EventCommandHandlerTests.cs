@@ -35,7 +35,7 @@ public sealed class CreateEventCommandHandlerTests
         dto.Tiers.Count.ShouldBe(2);
         dto.Version.ShouldBe("0000000000000001");
         _events.Received(1).Add(Arg.Any<Event>());
-        _unitOfWork.SaveCount.ShouldBe(1);
+        _unitOfWork.CommittedSaves.ShouldBe(1);
     }
 
     [Fact]
@@ -98,7 +98,7 @@ public sealed class UpdateEventCommandHandlerTests
         var dto = await Handler().HandleAsync(Rename("Encore", "current"), CancellationToken.None);
 
         dto.Name.ShouldBe("Encore");
-        _unitOfWork.SaveCount.ShouldBe(1);
+        _unitOfWork.CommittedSaves.ShouldBe(1);
     }
 
     [Fact]
@@ -108,7 +108,7 @@ public sealed class UpdateEventCommandHandlerTests
             () => Handler().HandleAsync(Rename("Encore", "stale"), CancellationToken.None));
 
         _concert.Name.ShouldBe("Symphony Night");
-        _unitOfWork.SaveCount.ShouldBe(0);
+        _unitOfWork.CommittedSaves.ShouldBe(0);
     }
 
     [Fact]
