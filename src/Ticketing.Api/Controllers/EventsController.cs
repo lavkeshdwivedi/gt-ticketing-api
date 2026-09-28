@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Net.Http.Headers;
 using Ticketing.Api.Auth;
 using Ticketing.Api.Contracts;
@@ -136,11 +137,13 @@ public sealed class EventsController : ControllerBase
     /// </summary>
     [HttpPost("{id:guid}/purchases")]
     [Authorize]
+    [EnableRateLimiting(RateLimiting.PurchasePolicy)]
     [ProducesResponseType<OrderDto>(StatusCodes.Status201Created)]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status429TooManyRequests)]
     public async Task<IActionResult> Purchase(
         Guid id,
         PurchaseTicketsRequest request,

@@ -21,6 +21,7 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddTicketingAuth(builder.Configuration);
+builder.Services.AddTicketingRateLimiting(builder.Configuration);
 
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
@@ -75,6 +76,7 @@ if (app.Configuration.GetValue<bool>("Database:MigrateOnStartup"))
 
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseRateLimiter();
 
 app.MapControllers();
 app.MapDevTokenEndpoint();

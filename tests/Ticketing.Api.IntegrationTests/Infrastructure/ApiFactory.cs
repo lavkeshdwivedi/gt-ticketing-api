@@ -40,6 +40,9 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         builder.UseSetting("Auth:DevSigningKey", SigningKey);
         builder.UseSetting("Auth:EnableDevTokenEndpoint", "true");
         builder.UseSetting("Database:MigrateOnStartup", "true");
+        // Tests exercise inventory under contention, not throttling; RateLimitingTests covers the limiter.
+        builder.UseSetting("RateLimiting:Purchases:TokenLimit", "1000");
+        builder.UseSetting("RateLimiting:Purchases:TokensPerPeriod", "1000");
         builder.UseSetting("Logging:LogLevel:Default", "Warning");
     }
 
