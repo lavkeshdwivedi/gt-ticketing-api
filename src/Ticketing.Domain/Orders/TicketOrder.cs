@@ -21,7 +21,6 @@ public sealed class TicketOrder
     {
         TierName = null!;
         UnitPrice = null!;
-        Total = null!;
         CustomerName = null!;
         CustomerEmail = null!;
         PurchasedBy = null!;
@@ -39,7 +38,8 @@ public sealed class TicketOrder
 
     public Money UnitPrice { get; private set; }
 
-    public Money Total { get; private set; }
+    /// <summary>Derived rather than stored, so it can never disagree with price and quantity.</summary>
+    public Money Total => UnitPrice.Multiply(Quantity);
 
     public string CustomerName { get; private set; }
 
@@ -86,7 +86,6 @@ public sealed class TicketOrder
             TierName = tier.Name,
             Quantity = quantity,
             UnitPrice = tier.Price,
-            Total = tier.Price.Multiply(quantity),
             CustomerName = Guard.Required(customerName, "customer.name", CustomerNameMaxLength),
             CustomerEmail = Guard.Required(customerEmail, "customer.email", CustomerEmailMaxLength).ToLowerInvariant(),
             PurchasedBy = Guard.Required(purchasedBy, "order.purchased_by", PurchasedByMaxLength),

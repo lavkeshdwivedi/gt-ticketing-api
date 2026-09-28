@@ -10,13 +10,9 @@ public sealed class GetOrderQueryHandler(IOrderReadModel orders)
     public async Task<OrderDto> HandleAsync(Guid orderId, Caller caller, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(caller);
-        var owned = await orders.GetAsync(orderId, cancellationToken);
-        if (owned is null || (!caller.IsAdmin && owned.PurchasedBy != caller.UserId))
-        {
-            throw new NotFoundException("Order", orderId);
-        }
-
-        return owned.Order;
+        var ownerFilter = caller.IsAdmin ? null : caller.UserId;
+        return await orders.GetAsync(orderId, ownerFilter, cancellationToken)
+            ?? throw new NotFoundException("Order", orderId);
     }
 }
 
