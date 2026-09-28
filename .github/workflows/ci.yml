@@ -1,0 +1,58 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore && dotnet tool restore
+
+      - name: Build (warnings are errors)
+        run: dotnet build --no-restore --configuration Release
+
+      - name: Migrations match the model
+        run: dotnet ef migrations has-pending-model-changes --project src/Ticketing.Infrastructure --startup-project src/Ticketing.Infrastructure --no-build --configuration Release
+
+      # Integration tests start SQL Server with Testcontainers; the hosted runner provides Docker.
+      - name: Test
+        run: >
+          dotnet test --no-build --configuration Release
+          --settings coverage.runsettings --collect:"XPlat Code Coverage"
+          --logger trx --results-directory TestResults
+
+      - name: Upload test results and coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: TestResults
+
+  container-images:
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build API image
+        run: docker build --target runtime --tag ticketing-api:${{ github.sha }} .
+      - name: Build migrator image
+        run: docker build --target migrator --tag ticketing-migrator:${{ github.sha }} .

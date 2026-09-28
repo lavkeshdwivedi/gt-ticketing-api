@@ -1,0 +1,67 @@
+# Azure DevOps equivalent of .github/workflows/ci.yml.
+trigger:
+  branches:
+    include: [main]
+pr:
+  branches:
+    include: ['*']
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  buildConfiguration: Release
+
+stages:
+  - stage: BuildAndTest
+    jobs:
+      - job: BuildAndTest
+        timeoutInMinutes: 20
+        steps:
+          - task: UseDotNet@2
+            displayName: Use .NET 10 SDK
+            inputs:
+              packageType: sdk
+              version: 10.0.x
+
+          - script: dotnet restore && dotnet tool restore
+            displayName: Restore
+
+          - script: dotnet build --no-restore --configuration $(buildConfiguration)
+            displayName: Build (warnings are errors)
+
+          - script: >
+              dotnet ef migrations has-pending-model-changes
+              --project src/Ticketing.Infrastructure --startup-project src/Ticketing.Infrastructure
+              --no-build --configuration $(buildConfiguration)
+            displayName: Migrations match the model
+
+          # Integration tests start SQL Server with Testcontainers; the hosted agent provides Docker.
+          - script: >
+              dotnet test --no-build --configuration $(buildConfiguration)
+              --settings coverage.runsettings --collect:"XPlat Code Coverage"
+              --logger trx --results-directory $(Agent.TempDirectory)/TestResults
+            displayName: Test
+
+          - task: PublishTestResults@2
+            condition: always()
+            inputs:
+              testResultsFormat: VSTest
+              testResultsFiles: $(Agent.TempDirectory)/TestResults/**/*.trx
+
+          - task: PublishCodeCoverageResults@2
+            condition: always()
+            inputs:
+              summaryFileLocation: $(Agent.TempDirectory)/TestResults/**/coverage.cobertura.xml
+
+  - stage: Images
+    dependsOn: BuildAndTest
+    jobs:
+      - job: Images
+        steps:
+          - script: docker build --target runtime --tag ticketing-api:$(Build.SourceVersion) .
+            displayName: Build API image
+          - script: docker build --target migrator --tag ticketing-migrator:$(Build.SourceVersion) .
+            displayName: Build migrator image
+          # A release pipeline (or Octopus) would push both to ACR, run the migrator as a
+          # deployment step, then roll out the API. See docs/operationalizing.md.
