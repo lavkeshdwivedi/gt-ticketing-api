@@ -17,7 +17,7 @@ public sealed class CreateEventCommandValidator : AbstractValidator<CreateEventC
 {
     public CreateEventCommandValidator()
     {
-        this.AddEventRules(c => c.Name, c => c.Description, c => c.Venue, c => c.Currency, c => c.TotalCapacity, c => c.Tiers);
+        this.AddEventRules(c => c.Name, c => c.Description, c => c.Venue, c => c.StartsAt, c => c.Currency, c => c.TotalCapacity, c => c.Tiers);
         RuleForEach(c => c.Tiers).Must(t => t.Id is null)
             .WithMessage("Tier ids cannot be supplied when creating an event.").OverridePropertyName("tiers");
     }

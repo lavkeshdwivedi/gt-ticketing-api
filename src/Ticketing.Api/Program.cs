@@ -1,25 +1,87 @@
+using System.Text.Json.Serialization;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.OpenApi.Models;
+using Ticketing.Api.Auth;
+using Ticketing.Api.Http;
+using Ticketing.Application;
+using Ticketing.Infrastructure;
+using Ticketing.Infrastructure.Persistence;
+
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
+var authority = builder.Configuration[$"{AuthOptions.Section}:{nameof(AuthOptions.Authority)}"];
+if (!builder.Environment.IsDevelopment() && string.IsNullOrWhiteSpace(authority))
+{
+    // Fail fast rather than fall back to development signing keys in a real environment.
+    throw new InvalidOperationException("Auth:Authority must be configured outside Development.");
+}
 
-builder.Services.AddControllers();
-// Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddApplication();
+builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddTicketingAuth(builder.Configuration);
+
+builder.Services.AddProblemDetails();
+builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+builder.Services
+    .AddControllers()
+    .AddJsonOptions(json =>
+    {
+        json.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
+        json.JsonSerializerOptions.Converters.Add(new StrictDateTimeOffsetConverter());
+    });
+
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerGen(swagger =>
+{
+    swagger.SwaggerDoc("v1", new OpenApiInfo
+    {
+        Title = "Ticketing API",
+        Version = "v1",
+        Description = "Event ticketing: events, inventory-safe purchases and sales reporting.",
+    });
+    swagger.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        Type = SecuritySchemeType.Http,
+        Scheme = "bearer",
+        BearerFormat = "JWT",
+        Description = "In Development, get a token from POST /dev/token.",
+    });
+    swagger.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        [new OpenApiSecurityScheme { Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" } }] = [],
+    });
+});
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
+app.UseExceptionHandler();
+app.UseStatusCodePages();
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
 }
 
-app.UseHttpsRedirection();
+if (app.Configuration.GetValue<bool>("Database:MigrateOnStartup"))
+{
+    // Convenient for local and container runs. Production applies migrations from the pipeline
+    // (idempotent script or migration bundle) so app instances never race each other on schema changes.
+    await using var scope = app.Services.CreateAsyncScope();
+    await scope.ServiceProvider.GetRequiredService<TicketingDbContext>().Database.MigrateAsync();
+}
 
+app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+app.MapDevTokenEndpoint();
+app.MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = _ => false }).AllowAnonymous();
+app.MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = c => c.Tags.Contains("ready") }).AllowAnonymous();
 
-app.Run();
+await app.RunAsync();
+
+/// <summary>Exposed for WebApplicationFactory in the integration tests.</summary>
+public partial class Program;

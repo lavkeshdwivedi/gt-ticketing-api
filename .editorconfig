@@ -383,3 +383,8 @@ dotnet_naming_style.s_camelcase.capitalization = camel_case
 dotnet_diagnostic.CA1716.severity = none
 # ASP.NET Core has no SynchronizationContext; ConfigureAwait(false) everywhere is noise here.
 dotnet_diagnostic.CA2007.severity = none
+
+# EF Core migrations are generated; don't hold them to hand-written style rules.
+[**/Migrations/*.cs]
+generated_code = true
+dotnet_analyzer_diagnostic.severity = none
