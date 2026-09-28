@@ -13,6 +13,7 @@ public sealed class TicketOrder
     public const int CustomerNameMaxLength = 200;
     public const int CustomerEmailMaxLength = 254;
     public const int IdempotencyKeyMaxLength = 100;
+    public const int PurchasedByMaxLength = 128;
 
     private readonly List<Ticket> _tickets = [];
 
@@ -23,6 +24,7 @@ public sealed class TicketOrder
         Total = null!;
         CustomerName = null!;
         CustomerEmail = null!;
+        PurchasedBy = null!;
     }
 
     public Guid Id { get; private set; }
@@ -43,6 +45,9 @@ public sealed class TicketOrder
 
     public string CustomerEmail { get; private set; }
 
+    /// <summary>Subject (user id) of the authenticated caller who placed the order. Only they, or an admin, can read it.</summary>
+    public string PurchasedBy { get; private set; }
+
     public string? IdempotencyKey { get; private set; }
 
     /// <summary>Hash of the purchase request, used to reject reuse of an idempotency key with a different payload.</summary>
@@ -61,6 +66,7 @@ public sealed class TicketOrder
         int quantity,
         string customerName,
         string customerEmail,
+        string purchasedBy,
         string? idempotencyKey,
         string? requestFingerprint,
         DateTimeOffset now)
@@ -83,6 +89,7 @@ public sealed class TicketOrder
             Total = tier.Price.Multiply(quantity),
             CustomerName = Guard.Required(customerName, "customer.name", CustomerNameMaxLength),
             CustomerEmail = Guard.Required(customerEmail, "customer.email", CustomerEmailMaxLength).ToLowerInvariant(),
+            PurchasedBy = Guard.Required(purchasedBy, "order.purchased_by", PurchasedByMaxLength),
             IdempotencyKey = Guard.Optional(idempotencyKey, "idempotency_key", IdempotencyKeyMaxLength),
             RequestFingerprint = requestFingerprint,
             PurchasedAt = now,

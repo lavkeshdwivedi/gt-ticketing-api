@@ -87,9 +87,12 @@ public sealed class PricingTier
 
     public static class Errors
     {
-        public static DomainConflictException InsufficientInventory(string tierName, int available) =>
-            new("tickets.sold_out", available == 0
-                ? $"Tier '{tierName}' is sold out."
-                : $"Only {available} tickets remain in tier '{tierName}'.");
+        public static DomainConflictException InsufficientInventory(string tierName, int? available = null) =>
+            new("tickets.sold_out", available switch
+            {
+                0 => $"Tier '{tierName}' is sold out.",
+                > 0 => $"Only {available} tickets remain in tier '{tierName}'.",
+                _ => $"Not enough tickets remain in tier '{tierName}'.",
+            });
     }
 }
