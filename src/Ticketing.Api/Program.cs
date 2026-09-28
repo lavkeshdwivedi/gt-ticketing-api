@@ -1,12 +1,10 @@
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi;
 using Ticketing.Api.Auth;
 using Ticketing.Api.Http;
 using Ticketing.Application;
 using Ticketing.Infrastructure;
-using Ticketing.Infrastructure.Persistence;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -63,14 +61,6 @@ if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
     app.UseSwaggerUI(ui => ui.SwaggerEndpoint("/openapi/v1.json", "Ticketing API v1"));
-}
-
-if (app.Configuration.GetValue<bool>("Database:MigrateOnStartup"))
-{
-    // Convenient for local and container runs. Production applies migrations from the pipeline
-    // (idempotent script or migration bundle) so app instances never race each other on schema changes.
-    await using var scope = app.Services.CreateAsyncScope();
-    await scope.ServiceProvider.GetRequiredService<TicketingDbContext>().Database.MigrateAsync();
 }
 
 app.UseAuthentication();

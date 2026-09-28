@@ -3,8 +3,10 @@ using System.Net.Http.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.SqlClient;
+using Microsoft.EntityFrameworkCore;
 using Testcontainers.MsSql;
 using Ticketing.Api.Auth;
+using Ticketing.Infrastructure.Persistence;
 
 namespace Ticketing.Api.IntegrationTests.Infrastructure;
 
@@ -25,6 +27,10 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
     {
         await _sql.StartAsync();
         ConnectionString = new SqlConnectionStringBuilder(_sql.GetConnectionString()) { InitialCatalog = "Ticketing" }.ConnectionString;
+
+        // Same migrations the deploy-time migrator applies; the API itself never manages schema.
+        await using var db = new TicketingDbContext(new DbContextOptionsBuilder<TicketingDbContext>().UseSqlServer(ConnectionString).Options);
+        await db.Database.MigrateAsync();
     }
 
     async Task IAsyncLifetime.DisposeAsync()
@@ -39,7 +45,6 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         builder.UseSetting("ConnectionStrings:Ticketing", ConnectionString);
         builder.UseSetting("Auth:DevSigningKey", SigningKey);
         builder.UseSetting("Auth:EnableDevTokenEndpoint", "true");
-        builder.UseSetting("Database:MigrateOnStartup", "true");
         // Tests exercise inventory under contention, not throttling; RateLimitingTests covers the limiter.
         builder.UseSetting("RateLimiting:Purchases:TokenLimit", "1000");
         builder.UseSetting("RateLimiting:Purchases:TokensPerPeriod", "1000");

@@ -68,6 +68,18 @@ public sealed class LayeringTests
     }
 
     [Fact]
+    public void The_api_host_never_touches_ef_core_or_schema()
+    {
+        // Schema changes ship through the migration bundle at deploy time, never from app startup.
+        var result = Types.InAssembly(Api)
+            .ShouldNot()
+            .HaveDependencyOn("Microsoft.EntityFrameworkCore")
+            .GetResult();
+
+        result.IsSuccessful.ShouldBeTrue(Describe(result));
+    }
+
+    [Fact]
     public void Infrastructure_implementations_are_internal()
     {
         // Only the DbContext (needed by the host to migrate) and EF-generated migrations may be public.

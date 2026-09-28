@@ -15,11 +15,22 @@ services:
       retries: 20
       start_period: 15s
 
-  api:
-    build: .
+  migrate:
+    build:
+      context: .
+      target: migrator
     depends_on:
       sql:
         condition: service_healthy
+    command: ["--connection", "Server=sql,1433;Database=Ticketing;User Id=sa;Password=Local_Dev_Only_P@ssw0rd;TrustServerCertificate=true;Encrypt=true"]
+
+  api:
+    build:
+      context: .
+      target: runtime
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__Ticketing: "Server=sql,1433;Database=Ticketing;User Id=sa;Password=Local_Dev_Only_P@ssw0rd;TrustServerCertificate=true;Encrypt=true"
