@@ -1,7 +1,7 @@
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.OpenApi.Models;
+using Microsoft.OpenApi;
 using Ticketing.Api.Auth;
 using Ticketing.Api.Http;
 using Ticketing.Application;
@@ -33,27 +33,26 @@ builder.Services
         json.JsonSerializerOptions.Converters.Add(new StrictDateTimeOffsetConverter());
     });
 
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen(swagger =>
+builder.Services.AddOpenApi(openApi => openApi.AddDocumentTransformer((document, _, _) =>
 {
-    swagger.SwaggerDoc("v1", new OpenApiInfo
+    document.Info = new OpenApiInfo
     {
         Title = "Ticketing API",
         Version = "v1",
         Description = "Event ticketing: events, inventory-safe purchases and sales reporting.",
-    });
-    swagger.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    };
+    document.Components ??= new OpenApiComponents();
+    document.Components.SecuritySchemes ??= new Dictionary<string, IOpenApiSecurityScheme>();
+    document.Components.SecuritySchemes["Bearer"] = new OpenApiSecurityScheme
     {
         Type = SecuritySchemeType.Http,
         Scheme = "bearer",
         BearerFormat = "JWT",
         Description = "In Development, get a token from POST /dev/token.",
-    });
-    swagger.AddSecurityRequirement(new OpenApiSecurityRequirement
-    {
-        [new OpenApiSecurityScheme { Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" } }] = [],
-    });
-});
+    };
+    document.Security = [new OpenApiSecurityRequirement { [new OpenApiSecuritySchemeReference("Bearer", document)] = [] }];
+    return Task.CompletedTask;
+}));
 
 var app = builder.Build();
 
@@ -62,8 +61,8 @@ app.UseStatusCodePages();
 
 if (app.Environment.IsDevelopment())
 {
-    app.UseSwagger();
-    app.UseSwaggerUI();
+    app.MapOpenApi();
+    app.UseSwaggerUI(ui => ui.SwaggerEndpoint("/openapi/v1.json", "Ticketing API v1"));
 }
 
 if (app.Configuration.GetValue<bool>("Database:MigrateOnStartup"))

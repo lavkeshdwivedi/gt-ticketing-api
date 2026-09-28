@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
 # Restore first, in its own layer, so code edits don't invalidate the package cache.
@@ -14,10 +14,10 @@ RUN dotnet restore src/Ticketing.Api/Ticketing.Api.csproj
 COPY src/ src/
 RUN dotnet publish src/Ticketing.Api/Ticketing.Api.csproj -c Release -o /app --no-restore
 
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
 COPY --from=build /app .
-# Built-in non-root user in the .NET 8 images.
+# Built-in non-root user in the official .NET images.
 USER app
 ENV ASPNETCORE_HTTP_PORTS=8080
 EXPOSE 8080

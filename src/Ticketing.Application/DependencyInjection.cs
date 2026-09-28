@@ -10,7 +10,7 @@ public static class DependencyInjection
 {
     /// <summary>
     /// Handlers are registered explicitly rather than dispatched through a mediator: one class per
-    /// use case, injected where it is used. See ADR 0006 for why MediatR was left out.
+    /// use case, injected where it is used. See ADR 0003 for why MediatR was left out.
     /// </summary>
     public static IServiceCollection AddApplication(this IServiceCollection services)
     {
