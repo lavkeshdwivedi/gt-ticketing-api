@@ -1,5 +1,7 @@
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Formatters;
 using Microsoft.OpenApi;
 using Ticketing.Api.Auth;
 using Ticketing.Api.Http;
@@ -24,7 +26,27 @@ builder.Services.AddTicketingRateLimiting(builder.Configuration);
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services
-    .AddControllers()
+    .AddControllers(mvc =>
+    {
+        // The API speaks JSON only; keep the OpenAPI contract free of text/plain and legacy text/json.
+        mvc.OutputFormatters.RemoveType<StringOutputFormatter>();
+        mvc.OutputFormatters.OfType<SystemTextJsonOutputFormatter>().Single().SupportedMediaTypes.Remove("text/json");
+    })
+    .ConfigureApiBehaviorOptions(api =>
+    {
+        // Model-binding failures (malformed JSON, bad timestamps) get the same stable code as validator failures.
+        var defaultFactory = api.InvalidModelStateResponseFactory;
+        api.InvalidModelStateResponseFactory = context =>
+        {
+            var result = defaultFactory(context);
+            if (result is ObjectResult { Value: ProblemDetails problem })
+            {
+                problem.Extensions["code"] = "validation_failed";
+            }
+
+            return result;
+        };
+    })
     .AddJsonOptions(json =>
     {
         json.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());

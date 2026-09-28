@@ -7,7 +7,7 @@ A REST API for a simplified event ticketing system: manage events with pricing t
 - **No overselling under contention.** 200 concurrent buyers racing for 50 seats sell exactly 50, and inventory counters, order rows, issued tickets and the sales report all reconcile. Tested against a real SQL Server and repeated to rule out flakiness; a k6 run of 2,000 attempts for 1,000 seats sells exactly 1,000.
 - **Safe retries.** Purchases honour `Idempotency-Key`; 20 concurrent retries with the same key produce exactly one order.
 - **No lost updates.** Admin edits use ETags; an edit based on a stale view (including stale inventory) gets `412`.
-- **116 tests** across domain, application, architecture rules and full-stack integration; **97% line coverage** of hand-written code.
+- **117 tests** across domain, application, architecture rules and full-stack integration; **97% line coverage** of hand-written code.
 - **Measured performance.** A load test found the bottleneck the design predicted, and a targeted fix doubled hot-event throughput (`loadtest/RESULTS.md`).
 
 ---
@@ -96,7 +96,7 @@ dotnet test --settings coverage.runsettings --collect:"XPlat Code Coverage"
 | `Ticketing.Domain.Tests` | 43 | Every invariant and its boundary: exact sell-out, shrink to exactly sold, per-order limits, currency lock, soft delete vs sales, money arithmetic |
 | `Ticketing.Application.Tests` | 23 | Handlers with substitutes: write-time sell-out rolls back, idempotent replay, key reuse with a different body, losing a same-key race, If-Match handling |
 | `Ticketing.ArchitectureTests` | 7 | Dependencies point inwards; controllers never touch persistence; the API never references EF Core; infrastructure types stay internal |
-| `Ticketing.Api.IntegrationTests` | 43 | The real app over HTTP against SQL Server in a container: CRUD, auth, every problem code, ETags, idempotency, rate limiting, reports, the overselling race, the raw SQL guard's every branch, Production hardening |
+| `Ticketing.Api.IntegrationTests` | 44 | The real app over HTTP against SQL Server in a container: CRUD, auth, every problem code, ETags, idempotency, rate limiting, reports, the overselling race, the raw SQL guard's every branch, Production hardening |
 
 Coverage of hand-written code (generated code and migrations excluded): Application 100%, Infrastructure 96%, Domain 94%, API 100% (top-level `Program.cs` statements are compiler-generated and therefore excluded; they are exercised by every integration test). Overall 97%.
 

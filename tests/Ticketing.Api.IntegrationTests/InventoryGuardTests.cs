@@ -2,7 +2,10 @@ using System.Net;
 using Microsoft.Extensions.DependencyInjection;
 using Ticketing.Api.IntegrationTests.Infrastructure;
 using Ticketing.Application.Abstractions;
+using Ticketing.Application.Common;
 using Ticketing.Application.Events;
+using Ticketing.Domain.Events;
+using Ticketing.Domain.Orders;
 
 namespace Ticketing.Api.IntegrationTests;
 
@@ -60,6 +63,22 @@ public sealed class InventoryGuardTests(ApiFactory factory)
         var created = await (await factory.Admin()).CreateEventAsync(TestApi.SingleTierEvent(capacity: 3));
 
         (await Reserve(created, 1, now: created.StartsAt)).ShouldBe(ReservationOutcome.EventNotOnSale);
+    }
+
+    [Fact]
+    public async Task An_order_for_a_tier_removed_concurrently_is_a_conflict_not_a_server_error()
+    {
+        // The buyer's snapshot references a tier that no longer exists in the database, as if an
+        // admin removed it between the buyer's read and the order insert.
+        var snapshot = Event.Create(
+            "Ghost", null, "Nowhere", DateTimeOffset.UtcNow.AddDays(30), "USD", 1,
+            [new PricingTierDefinition(null, "Removed", 10m, 1)], DateTimeOffset.UtcNow);
+        var order = TicketOrder.Place(snapshot, snapshot.Tiers[0], 1, "Ada", "ada@example.com", "user-1", null, null, DateTimeOffset.UtcNow);
+        await using var scope = factory.Services.CreateAsyncScope();
+        scope.ServiceProvider.GetRequiredService<ITicketOrderRepository>().Add(order);
+
+        await Should.ThrowAsync<ConcurrencyConflictException>(
+            () => scope.ServiceProvider.GetRequiredService<IUnitOfWork>().SaveChangesAsync(CancellationToken.None));
     }
 
     [Fact]

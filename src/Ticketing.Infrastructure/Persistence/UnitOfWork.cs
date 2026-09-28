@@ -10,6 +10,7 @@ internal sealed class UnitOfWork(TicketingDbContext db) : IUnitOfWork
 {
     private const int UniqueIndexViolation = 2601;
     private const int UniqueConstraintViolation = 2627;
+    private const int ForeignKeyViolation = 547;
 
     public async Task SaveChangesAsync(CancellationToken cancellationToken)
     {
@@ -24,6 +25,12 @@ internal sealed class UnitOfWork(TicketingDbContext db) : IUnitOfWork
         catch (DbUpdateException ex) when (IsUniqueViolation(ex, TicketOrderConfiguration.IdempotencyIndex))
         {
             throw new DuplicateIdempotencyKeyException(ex);
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is SqlException { Number: ForeignKeyViolation })
+        {
+            // Something this write refers to was removed concurrently, e.g. an admin deleted an
+            // unsold tier while a buyer was purchasing from it. The caller should reload and retry.
+            throw new ConcurrencyConflictException(ex);
         }
     }
 

@@ -15,7 +15,6 @@ namespace Ticketing.Api.Controllers;
 
 [ApiController]
 [Route("api/v1/events")]
-[Produces("application/json")]
 public sealed class EventsController : ControllerBase
 {
     public const string IdempotencyKeyHeader = "Idempotency-Key";

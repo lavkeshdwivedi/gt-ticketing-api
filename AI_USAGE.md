@@ -26,7 +26,7 @@ I built this with Claude Code (Anthropic's coding agent) working in my terminal.
 ## Where it accelerated me
 
 - Scaffolding the solution, central package management, analyzers and warnings-as-errors in minutes.
-- Writing the bulk of the tests. 116 tests (domain, handlers, architecture rules, and Testcontainers integration tests including a 200-buyer race) is not something I would have had time to write by hand in a few hours.
+- Writing the bulk of the tests. 117 tests (domain, handlers, architecture rules, and Testcontainers integration tests including a 200-buyer race) is not something I would have had time to write by hand in a few hours.
 - Keeping docs honest: ADRs were written alongside the code, and updated when the code changed (ADR 0001 was revised after the load test).
 - Checking current facts instead of guessing: current .NET support dates, current package versions, which libraries changed licence.
 
@@ -39,7 +39,8 @@ I think this is the most important part. AI output is a draft until something in
 3. **A query EF could not translate.** An early read model used an `AsQueryable()` trick inside a projection. It was spotted in review before running; the ownership check was redesigned into the `WHERE` clause, which is also better security (a foreign order is indistinguishable from a missing one).
 4. **A wrong architecture rule.** A NetArchTest filter chained `Or()` in a way that grouped differently than intended and flagged correct code. Rewritten as plain reflection so the rule is unambiguous.
 5. **Misleading numbers, twice.** Coverage first read 75% because source generators (OpenAPI XML docs, regex, logging) were counted; with generated code excluded it is 97% of hand-written code, and the README notes the one caveat (top-level `Program.cs` is excluded too). The first load test reported 0.36% failures that were actually setup calls returning 200. Both are fixed and explained rather than hidden.
-6. **A race found during design, not by a test.** Delete versus purchase could delete an event with a sale on it. The agent flagged it while implementing the delete path and laid out three ways to close it; I chose the fix.
+6. **Three more from a deliberate review pass.** After everything was green I had the agent re-read the purchase path and error handling looking for failure modes. It found: an admin removing an unsold tier while a buyer purchases from it surfaced as a 500 (foreign key violation), now a 409 retry; malformed JSON returned a 400 without the stable `code` every other error has; and the controllers' `[Produces]` attributes were silently turning error bodies into `application/json`. That last one was caught only because the new test asserted the content type. Each fix came with a test.
+7. **A race found during design, not by a test.** Delete versus purchase could delete an event with a sale on it. The agent flagged it while implementing the delete path and laid out three ways to close it; I chose the fix.
 
 ## How I verified
 

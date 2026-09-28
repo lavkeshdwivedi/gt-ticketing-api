@@ -8,7 +8,6 @@ namespace Ticketing.Api.Controllers;
 [ApiController]
 [Authorize]
 [Route("api/v1/orders")]
-[Produces("application/json")]
 public sealed class OrdersController : ControllerBase
 {
     public const string GetOrderRoute = nameof(GetOrderRoute);

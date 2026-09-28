@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Security.Claims;
 using System.Threading.RateLimiting;
@@ -74,7 +75,7 @@ public static class RateLimiting
                     Detail = "Purchase rate limit exceeded. Retry after the period in the Retry-After header.",
                     Type = "https://httpstatuses.io/429",
                     Instance = http.Request.Path,
-                    Extensions = { ["code"] = "rate_limited", ["traceId"] = http.TraceIdentifier },
+                    Extensions = { ["code"] = "rate_limited", ["traceId"] = Activity.Current?.Id ?? http.TraceIdentifier },
                 };
                 await http.RequestServices.GetRequiredService<IProblemDetailsService>()
                     .WriteAsync(new ProblemDetailsContext { HttpContext = http, ProblemDetails = problem });

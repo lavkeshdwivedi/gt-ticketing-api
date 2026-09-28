@@ -8,7 +8,6 @@ namespace Ticketing.Api.Controllers;
 [ApiController]
 [Authorize(Policy = Policies.ReportsRead)]
 [Route("api/v1/reports")]
-[Produces("application/json")]
 public sealed class ReportsController : ControllerBase
 {
     /// <summary>

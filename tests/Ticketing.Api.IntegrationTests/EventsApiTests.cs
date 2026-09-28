@@ -80,7 +80,7 @@ public sealed class EventsApiTests(ApiFactory factory)
 
         var response = await admin.PostAsync("/api/v1/events", new StringContent(json, Encoding.UTF8, "application/json"));
 
-        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        await response.ShouldBeProblem(HttpStatusCode.BadRequest, "validation_failed");
     }
 
     [Fact]
