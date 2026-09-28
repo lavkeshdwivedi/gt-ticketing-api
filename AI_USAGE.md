@@ -2,9 +2,11 @@
 
 I built this with Claude Code (Anthropic's coding agent) working in my terminal. The short version: I acted as tech lead and reviewer, the agent did most of the typing, and nothing was accepted without tests proving it, including against a real SQL Server.
 
+**Time:** about 2 hours 40 minutes of working time, 09:31 to 12:12, for everything in the repository: code, 117 tests, load test, CI and docs. The first 45 minutes went on reading the brief, planning and settling the domain model, so the first commits land at 10:16. The history was committed in slices as each layer built and passed its tests, not as a live log of every change.
+
 ## How the work was split
 
-**I owned the decisions.** Before and during the build, I had the agent bring every design choice to me as a small set of options with trade-offs and a recommendation, and I picked. The ones that shaped the system:
+**I owned the decisions.** Before and during the build, I had the agent bring every design choice to me as a small set of options with trade-offs and a recommendation, and I picked. Most of the time its recommendation was also my pick, which is what you would hope for when the options are laid out well. Where I disagreed I overrode it: it recommended leaving auth out of the code and only documenting it, and I chose to implement JWT with role policies, because ownership checks on orders are part of getting the API right. The ones that shaped the system:
 
 | Decision | What I chose | Why |
 |---|---|---|
@@ -41,6 +43,12 @@ I think this is the most important part. AI output is a draft until something in
 5. **Misleading numbers, twice.** Coverage first read 75% because source generators (OpenAPI XML docs, regex, logging) were counted; with generated code excluded it is 97% of hand-written code, and the README notes the one caveat (top-level `Program.cs` is excluded too). The first load test reported 0.36% failures that were actually setup calls returning 200. Both are fixed and explained rather than hidden.
 6. **Three more from a deliberate review pass.** After everything was green I had the agent re-read the purchase path and error handling looking for failure modes. It found: an admin removing an unsold tier while a buyer purchases from it surfaced as a 500 (foreign key violation), now a 409 retry; malformed JSON returned a 400 without the stable `code` every other error has; and the controllers' `[Produces]` attributes were silently turning error bodies into `application/json`. That last one was caught only because the new test asserted the content type. Each fix came with a test.
 7. **A race found during design, not by a test.** Delete versus purchase could delete an event with a sale on it. The agent flagged it while implementing the delete path and laid out three ways to close it; I chose the fix.
+
+8. **Two gaps I found reviewing the finished code myself.** Neither is covered by a test yet, and I would fix both before production:
+   - Because every sale bumps the event's rowversion, and that rowversion is also the ETag, an admin editing a popular event during an on-sale will keep getting `412` even for a description typo. The fix is to version the editable details separately from inventory.
+   - The order's unit price comes from the event read before the purchase transaction. If an admin changes a tier's price in that small window, the buyer pays the old price. The fix is to include the expected price in the guarded tier `UPDATE`.
+
+   The in-memory rate limiter is also per instance. Behind several instances, the effective limit multiplies, so in production it belongs at the gateway (Front Door or APIM) or in a shared store.
 
 ## How I verified
 
